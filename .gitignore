@@ -8,4 +8,5 @@ npm-debug.log*
 *~
 .vscode/
 .idea/
-tsconfig.tsbuildinfo
+**/*.tsbuildinfo
+coverage/

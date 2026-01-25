@@ -16,6 +16,8 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "npm run build"
   },
   "author": "dleone",
@@ -25,9 +27,11 @@
   },
   "devDependencies": {
     "@signalk/server-api": "^2.10.2",
-    "@tsconfig/node20": "^20.1.8",
-    "@types/node": "^20.19.30",
-    "typescript": "^5.9.3"
+    "@tsconfig/node24": "^24.0.4",
+    "@types/node": "^25.0.10",
+    "@vitest/coverage-v8": "^4.0.18",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   },
   "repository": {
     "type": "git",
