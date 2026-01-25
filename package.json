@@ -1,6 +1,6 @@
 {
   "name": "signalk-bluetooth-scanner",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Signal K plugin for scanning and monitoring Bluetooth devices",
   "keywords": [
     "signalk-node-server-plugin",
