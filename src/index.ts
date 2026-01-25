@@ -8,6 +8,7 @@ interface SeenDevice {
   lastSeen: string
   rssi: number
   count: number
+  lastPosition: { latitude: number; longitude: number } | null
 }
 
 interface WatchedDevice {
@@ -52,10 +53,13 @@ const plugin: Plugin = {
       const now = new Date().toISOString()
       const device = seenDevices.get(address)
 
+      const currentPosition = app.getSelfPath('navigation.position.value')
+      
       if (device) {
         device.lastSeen = now
         device.rssi = peripheral.rssi
         device.count++
+        device.lastPosition = currentPosition || device.lastPosition
         if (peripheral.advertisement?.localName && !device.name) {
           device.name = peripheral.advertisement.localName
         }
@@ -66,7 +70,8 @@ const plugin: Plugin = {
           firstSeen: now,
           lastSeen: now,
           rssi: peripheral.rssi,
-          count: 1
+          count: 1,
+          lastPosition: currentPosition
         })
         app.debug(`New device: ${address} (${peripheral.advertisement?.localName || 'Unknown'})`)
       }
@@ -155,7 +160,6 @@ function checkWatchedDevices() {
       mobActive.add(address)
       app.debug(`MOB triggered: ${watched.userName} (${address}) - not seen for ${Math.floor(elapsed)}s`)
       
-      const position = app.getSelfPath('navigation.position.value')
       const key = watched.userName.replace(/\s+/g, '_').toLowerCase()
       const lastSeenTime = new Date(device.lastSeen).toLocaleTimeString()
       
@@ -170,7 +174,7 @@ function checkWatchedDevices() {
               state: 'emergency',
               method: ['visual', 'sound'],
               message: `${watched.userName} not seen since: ${lastSeenTime}`,
-              ...(position && { position })
+              ...(device.lastPosition && { position: device.lastPosition })
             }
           }]
         }]
