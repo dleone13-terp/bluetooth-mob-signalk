@@ -1,0 +1,36 @@
+{
+  "name": "signalk-bluetooth-scanner",
+  "version": "1.0.0",
+  "description": "Signal K plugin for scanning and monitoring Bluetooth devices",
+  "keywords": [
+    "signalk-node-server-plugin",
+    "signalk-webapp",
+    "signalk-category-hardware"
+  ],
+  "signalk-plugin-enabled-by-default": false,
+  "signalk": {
+    "appIcon": "./assets/icon.png",
+    "displayName": "Bluetooth Scanner"
+  },
+  "main": "plugin/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "dleone",
+  "license": "MIT",
+  "dependencies": {
+    "@abandonware/noble": "^1.9.2-26"
+  },
+  "devDependencies": {
+    "@signalk/server-api": "^2.10.2",
+    "@tsconfig/node20": "^20.1.8",
+    "@types/node": "^20.19.30",
+    "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dleone13-terp/bluetooth-mob-signalk.git"
+  }
+}
