@@ -35,12 +35,12 @@ describe('Bluetooth MOB Plugin', () => {
       }
     }
 
-    // Clear require cache
-    delete require.cache[require.resolve('../plugin/index.js')]
+    const path = require('path')
+    const fs = require('fs')
+
+    // Ensure noble mock is available for both CJS and ESM imports
     const noblePath = require.resolve('@abandonware/noble')
-    delete require.cache[noblePath]
-    
-    // Mock noble in require cache - needs both CommonJS and ES module formats
+    try { delete require.cache[noblePath] } catch (e) {}
     const nobleModule = { default: noble, __esModule: true }
     require.cache[noblePath] = {
       id: noblePath,
@@ -48,9 +48,17 @@ describe('Bluetooth MOB Plugin', () => {
       loaded: true,
       exports: nobleModule
     } as any
-    
-    // Load plugin
-    const pluginConstructor = require('../plugin/index.js')
+
+    // Prefer compiled plugin if present, otherwise import TS source
+    const compiledPath = path.resolve(__dirname, '../plugin/index.js')
+    let pluginConstructor: any
+    if (fs.existsSync(compiledPath)) {
+      try { delete require.cache[require.resolve(compiledPath)] } catch (e) {}
+      pluginConstructor = require(compiledPath)
+    } else {
+      const mod = await import('../src/index')
+      pluginConstructor = (mod && (mod as any).default) || mod
+    }
     plugin = pluginConstructor(mockApp)
   })
 
