@@ -1,5 +1,6 @@
 import { Plugin, ServerAPI } from '@signalk/server-api'
 import noble from '@abandonware/noble'
+import * as dgram from 'dgram'
 
 interface SeenDevice {
   address: string
@@ -23,59 +24,63 @@ const watchedDevices = new Map<string, WatchedDevice>()
 const mobActive = new Set<string>()
 const subscriptions: any[] = []
 let checkTimer: NodeJS.Timeout | null = null
+let udpServer: dgram.Socket | null = null
 
 const plugin: Plugin = {
   id: 'signalk-bluetooth-scanner',
   name: 'Bluetooth Scanner',
 
-  start: function () {
+  start: function (options: any) {
     app.debug('Plugin started')
     app.setPluginStatus('Initializing...')
 
-    noble.on('stateChange', (state) => {
-      app.debug(`Bluetooth state changed: ${state}`)
-      if (state === 'poweredOn') {
+    const useExternalScanner = options?.useExternalScanner || false
+    const scannerHost = options?.scannerHost || '127.0.0.1'
+    const scannerUdpPort = options?.scannerUdpPort || 51234
+
+    if (useExternalScanner) {
+      app.debug(`Starting UDP listener on ${scannerHost}:${scannerUdpPort} for external scanner...`)
+      udpServer = dgram.createSocket('udp4')
+      
+      udpServer.on('error', (err) => {
+        app.debug(`UDP Server Error: ${err.message}`)
+        if (udpServer) udpServer.close()
+        app.setPluginStatus(`Error: ${err.message}`)
+      })
+
+      udpServer.on('message', (msg) => {
+        try {
+          const peripheral = JSON.parse(msg.toString())
+          handleDevice(peripheral)
+        } catch (e) {
+          app.debug('Failed to parse UDP message as JSON', msg.toString())
+        }
+      })
+
+      udpServer.bind(scannerUdpPort, scannerHost, () => {
+        app.setPluginStatus(`Listening on UDP ${scannerHost}:${scannerUdpPort}`)
+        app.debug(`UDP server listening on ${scannerHost}:${scannerUdpPort}`)
+        updatePluginStatus()
+      })
+    } else {
+      noble.on('stateChange', (state) => {
+        app.debug(`Bluetooth state changed: ${state}`)
+        if (state === 'poweredOn') {
+          noble.startScanning([], true)
+          updatePluginStatus()
+        } else {
+          app.setPluginStatus(`Bluetooth ${state}`)
+          noble.stopScanning()
+        }
+      })
+
+      if ((noble as any)._state === 'poweredOn') {
         noble.startScanning([], true)
         updatePluginStatus()
-      } else {
-        app.setPluginStatus(`Bluetooth ${state}`)
-        noble.stopScanning()
       }
-    })
 
-    if ((noble as any)._state === 'poweredOn') {
-      noble.startScanning([], true)
-      updatePluginStatus()
+      noble.on('discover', handleDevice)
     }
-
-    noble.on('discover', (peripheral) => {
-      const address = peripheral.address
-      const now = new Date().toISOString()
-      const device = seenDevices.get(address)
-
-      const currentPosition = app.getSelfPath('navigation.position.value')
-      
-      if (device) {
-        device.lastSeen = now
-        device.rssi = peripheral.rssi
-        device.count++
-        device.lastPosition = currentPosition || device.lastPosition
-        if (peripheral.advertisement?.localName && !device.name) {
-          device.name = peripheral.advertisement.localName
-        }
-      } else {
-        seenDevices.set(address, {
-          address,
-          name: peripheral.advertisement?.localName || null,
-          firstSeen: now,
-          lastSeen: now,
-          rssi: peripheral.rssi,
-          count: 1,
-          lastPosition: currentPosition
-        })
-        app.debug(`New device: ${address} (${peripheral.advertisement?.localName || 'Unknown'})`)
-      }
-    })
 
     checkTimer = setInterval(checkWatchedDevices, 5000)
   },
@@ -84,14 +89,42 @@ const plugin: Plugin = {
     if (checkTimer) clearInterval(checkTimer)
     subscriptions.forEach(unsubscribe => unsubscribe())
     subscriptions.length = 0
-    noble.stopScanning()
-    noble.removeAllListeners()
+    if (udpServer) {
+      udpServer.close()
+      udpServer = null
+    } else {
+      noble.stopScanning()
+      noble.removeAllListeners()
+    }
     seenDevices.clear()
   },
 
-  schema: () => ({}),
+  schema: () => ({
+    type: 'object',
+    properties: {
+      useExternalScanner: {
+        type: 'boolean',
+        title: 'Use External Scanner',
+        description: 'Run the Bluetooth scanner externally (e.g. as root) and bind to a UDP port to receive device datagrams',
+        default: false
+      },
+      scannerHost: {
+        type: 'string',
+        title: 'Scanner Host IP',
+        description: 'The IP address to bind the UDP listener',
+        default: '127.0.0.1'
+      },
+      scannerUdpPort: {
+        type: 'number',
+        title: 'Scanner UDP Port',
+        description: 'The UDP port to listen on and the external scanner script to transmit to',
+        default: 51234
+      }
+    }
+  }),
 
   registerWithRouter: function (router) {
+
     router.get('/devices', (_req: any, res: any) => {
       res.json({ devices: Array.from(seenDevices.values()), count: seenDevices.size })
     })
@@ -147,8 +180,38 @@ const plugin: Plugin = {
   }
 }
 
+function handleDevice(peripheral: any) {
+  const address = peripheral.address
+  const now = new Date().toISOString()
+  const device = seenDevices.get(address)
+
+  const currentPosition = app.getSelfPath('navigation.position.value')
+  
+  if (device) {
+    device.lastSeen = now
+    device.rssi = peripheral.rssi
+    device.count++
+    device.lastPosition = currentPosition || device.lastPosition
+    if (peripheral.advertisement?.localName && !device.name) {
+      device.name = peripheral.advertisement.localName
+    }
+  } else {
+    seenDevices.set(address, {
+      address,
+      name: peripheral.advertisement?.localName || null,
+      firstSeen: now,
+      lastSeen: now,
+      rssi: peripheral.rssi,
+      count: 1,
+      lastPosition: currentPosition
+    })
+    app.debug(`New device: ${address} (${peripheral.advertisement?.localName || 'Unknown'})`)
+  }
+}
+
 function checkWatchedDevices() {
   const now = Date.now()
+
   
   watchedDevices.forEach((watched, address) => {
     const device = seenDevices.get(address)

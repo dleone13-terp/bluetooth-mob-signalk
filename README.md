@@ -44,12 +44,51 @@ npm link signalk-bluetooth-scanner
 
 ## Setup
 
-### Linux Bluetooth Permissions
+### Internal Scanner: Linux Bluetooth Permissions (Default)
 
-Grant Node.js permission to access Bluetooth without root:
+If you intend to run the scanner within the Node.js process running Signal K, grant Node.js permission to access Bluetooth without root:
 
 ```bash
 sudo setcap cap_net_raw+eip $(eval readlink -f `which node`)
+```
+
+### External Root Scanner (Alternative)
+
+If you do not want to give the `node` binary network capabilities or if your system does not support `setcap`, you can run a standalone root scanner script provided with this plugin. The script transmits telemetry back to the plugin via UDP.
+
+This is primarily for use with VenusOS. It's a little hacky but it gets around the lack of setcap in Venus.
+
+1. Navigate to **Server → Plugin Config** in the Signal K Admin UI.
+2. Enable "Use External Scanner" in the Bluetooth Scanner settings. You can also configure the target UDP port.
+3. Run the standalone scanner script as a system service or root process. You can optionally pass the host and port arguments (default `127.0.0.1 51234`):
+
+```bash
+# Example running the script via sudo:
+sudo node ~/.signalk/node_modules/signalk-bluetooth-scanner/plugin/scanner.js 127.0.0.1 51234
+```
+
+**Recommended (`systemd` Service)**
+To run the external scanner continuously in the background, create a systemd service file `/etc/systemd/system/bluetooth-mob-scanner.service`:
+```ini
+[Unit]
+Description=Signal K Bluetooth MOB Scanner
+After=bluetooth.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/node /home/pi/.signalk/node_modules/signalk-bluetooth-scanner/plugin/scanner.js 127.0.0.1 51234
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+Start and enable the service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl start bluetooth-mob-scanner
+sudo systemctl enable bluetooth-mob-scanner
 ```
 
 ### Enable Plugin
