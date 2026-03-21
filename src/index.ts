@@ -1,5 +1,6 @@
 import { Plugin, ServerAPI } from '@signalk/server-api'
-import noble from '@abandonware/noble'
+let noble: any
+// Load noble lazily inside `start`/`stop` so tests can mock it before use.
 import * as dgram from 'dgram'
 
 interface SeenDevice {
@@ -63,7 +64,13 @@ const plugin: Plugin = {
         updatePluginStatus()
       })
     } else {
-      noble.on('stateChange', (state) => {
+      // Lazy-require noble so test mocks apply before we load the module
+      // Use require to support both CJS and ESM default shapes.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const nobleModule = require('@abandonware/noble')
+      noble = (nobleModule && nobleModule.default) ? nobleModule.default : nobleModule
+
+      noble.on('stateChange', (state: any) => {
         app.debug(`Bluetooth state changed: ${state}`)
         if (state === 'poweredOn') {
           noble.startScanning([], true)
@@ -73,7 +80,7 @@ const plugin: Plugin = {
           noble.stopScanning()
         }
       })
-
+      
       if ((noble as any)._state === 'poweredOn') {
         noble.startScanning([], true)
         updatePluginStatus()

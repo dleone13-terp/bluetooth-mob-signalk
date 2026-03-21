@@ -8,8 +8,9 @@ describe('Bluetooth MOB Plugin', () => {
   let stateChangeHandler: any
 
   beforeEach(async () => {
+    vi.resetModules()
     vi.clearAllMocks()
-    
+
     // Create noble mock
     noble = {
       on: vi.fn((event: string, handler: any) => {
@@ -21,7 +22,7 @@ describe('Bluetooth MOB Plugin', () => {
       removeAllListeners: vi.fn(),
       _state: 'poweredOff'
     }
-    
+
     // Mock Signal K server API
     mockApp = {
       debug: vi.fn(),
@@ -35,12 +36,8 @@ describe('Bluetooth MOB Plugin', () => {
       }
     }
 
-    const path = require('path')
-    const fs = require('fs')
-
-    // Ensure noble mock is available for both CJS and ESM imports
+    // Mock '@abandonware/noble' in require cache so `require()` returns our mock
     const noblePath = require.resolve('@abandonware/noble')
-    try { delete require.cache[noblePath] } catch (e) {}
     const nobleModule = { default: noble, __esModule: true }
     require.cache[noblePath] = {
       id: noblePath,
@@ -49,16 +46,9 @@ describe('Bluetooth MOB Plugin', () => {
       exports: nobleModule
     } as any
 
-    // Prefer compiled plugin if present, otherwise import TS source
-    const compiledPath = path.resolve(__dirname, '../plugin/index.js')
-    let pluginConstructor: any
-    if (fs.existsSync(compiledPath)) {
-      try { delete require.cache[require.resolve(compiledPath)] } catch (e) {}
-      pluginConstructor = require(compiledPath)
-    } else {
-      const mod = await import('../src/index')
-      pluginConstructor = (mod && (mod as any).default) || mod
-    }
+    // Load plugin from TypeScript source
+    const mod = await import('../src/index')
+    const pluginConstructor = (mod && (mod as any).default) || mod
     plugin = pluginConstructor(mockApp)
   })
 
@@ -70,7 +60,7 @@ describe('Bluetooth MOB Plugin', () => {
         // Ignore noble errors in test cleanup
       }
     }
-    delete require.cache[require.resolve('@abandonware/noble')]
+    try { delete require.cache[require.resolve('@abandonware/noble')] } catch (e) {}
   })
 
   describe('Device Discovery', () => {
