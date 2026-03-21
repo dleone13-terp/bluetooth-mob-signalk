@@ -13,13 +13,17 @@
     "displayName": "Bluetooth Scanner"
   },
   "main": "plugin/index.js",
+  "files": [
+    "plugin",
+    "public"
+  ],
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
     "pretest": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build"
+    "prepare": "npm run build"
   },
   "author": "dleone",
   "license": "MIT",
