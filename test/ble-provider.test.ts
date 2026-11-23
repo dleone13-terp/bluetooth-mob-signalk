@@ -149,6 +149,46 @@ describe('Signal K BLE provider', () => {
     expect(app.handleMessage).toHaveBeenCalledTimes(2)
   })
 
+  it('uses the native MOB API and tracks its identifier for clearing and re-alerts', () => {
+    const values = new Map<string, any>()
+    app.getSelfPath.mockImplementation((path: string) => path === 'navigation.position.value'
+      ? { latitude: 38, longitude: -75 } : values.get(path))
+    app.notifications = { mob: vi.fn(() => {
+      const id = `alarm-${app.notifications.mob.mock.calls.length}`
+      values.set(`notifications.mob.${id}.value`, { state: 'emergency' })
+      // The real server may deliver this before mob() returns the id.
+      clearNotification()
+      return id
+    }) }
+    plugin.start()
+    emit()
+    watch(1)
+    expect(app.subscriptionmanager.subscribe.mock.calls[0][0].subscribe[0].path)
+      .toBe('notifications.mob.*')
+    vi.advanceTimersByTime(15000)
+    expect(app.notifications.mob).toHaveBeenCalledTimes(1)
+    expect(app.notifications.mob).toHaveBeenCalledWith(expect.stringContaining('Crew member not seen since:'))
+    expect(app.handleMessage).not.toHaveBeenCalled()
+    values.set('notifications.mob.alarm-1.value', { state: 'normal' })
+    clearNotification()
+    vi.advanceTimersByTime(15000)
+    expect(app.notifications.mob).toHaveBeenCalledTimes(2)
+    expect(values.get('notifications.mob.alarm-2.value').state).toBe('emergency')
+  })
+
+  it('does not treat another person\'s notification as clearing the active MOB', () => {
+    app.notifications = { mob: vi.fn(() => 'crew-alarm') }
+    app.getSelfPath.mockImplementation((path: string) => path === 'notifications.mob.crew-alarm.value'
+      ? { state: 'emergency' } : null)
+    plugin.start()
+    emit()
+    watch(1)
+    vi.advanceTimersByTime(5000)
+    clearNotification()
+    vi.advanceTimersByTime(10000)
+    expect(app.notifications.mob).toHaveBeenCalledTimes(1)
+  })
+
   it('does not alert for an unwatched device or a watch with no received sighting', () => {
     plugin.start()
     watch(1)

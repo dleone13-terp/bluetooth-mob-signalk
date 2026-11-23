@@ -61,8 +61,12 @@ unsubscribes it without stopping other BLE consumers.
 Device MAC addresses are normalized to lowercase to match existing watches.
 Repeated advertisements refresh the device's last-seen timestamp even when
 RSSI and payload are unchanged. The provider timestamp is used rather than
-treating cached device listings as new sightings. The existing per-person MOB
-notifications and timeout settings continue to work.
+treating cached device listings as new sightings. Timeout settings are unchanged.
+
+When the server exposes `app.notifications.mob()`, alerts use the native MOB
+API, including the vessel position at detection time and standard notification
+clearing. The person's name is included in the message. Older servers retain
+the per-person `notifications.mob.<person_name>` delta format.
 
 **Use External Scanner** takes precedence when enabled. On older servers without
 the BLE API, or when **Use Signal K BLE Manager** is disabled, the plugin uses
@@ -143,8 +147,10 @@ Access at: `http://[your-signalk-server]:3000/signalk-bluetooth-scanner`
 
 When a watched device is not detected for the specified timeout:
 
-- Emergency notification is sent to `notifications.mob.[person_name]`
-- Notification includes the vessel's last known position
+- On servers with the native MOB API, an emergency notification is created at
+  `notifications.mob.<notification_id>`, with the vessel's position at detection.
+- Older servers receive `notifications.mob.[person_name]`, with the position
+  recorded at the last device sighting.
 - Message format: `{name} not seen since: {time}`
 
 ### Clearing MOB Alerts

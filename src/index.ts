@@ -23,6 +23,7 @@ let app: ServerAPI
 const seenDevices = new Map<string, SeenDevice>()
 const watchedDevices = new Map<string, WatchedDevice>()
 const mobActive = new Set<string>()
+const mobPaths = new Map<string, string>()
 const subscriptions: any[] = []
 let checkTimer: NodeJS.Timeout | null = null
 let udpServer: dgram.Socket | null = null
@@ -169,14 +170,17 @@ const plugin: Plugin = {
         {
           context: 'vessels.self',
           subscribe: [{
-            path: `notifications.mob.${key}`,
+            path: typeof app.notifications?.mob === 'function' ? 'notifications.mob.*' : `notifications.mob.${key}`,
             period: 1000
           }]
         } as any,
         localUnsubscribes,
         (err: any) => { app.debug(`Subscription error: ${err}`) },
         () => {
-          const notification = app.getSelfPath(`notifications.mob.${key}.value`) as Notification | null | undefined
+          const path = typeof app.notifications?.mob === 'function' ? mobPaths.get(address) : `notifications.mob.${key}`
+          // mob() can publish synchronously before returning its notification id.
+          if (!path) return
+          const notification = app.getSelfPath(`${path}.value`) as Notification | null | undefined
           if (!notification || notification.state === 'normal' || notification.state === null) {
             mobActive.delete(address)
             app.debug(`MOB cleared for ${userName}, can re-trigger`)
@@ -194,6 +198,7 @@ const plugin: Plugin = {
       app.debug(`Unwatching device: ${req.params.address}`)
       watchedDevices.delete(req.params.address)
       mobActive.delete(req.params.address)
+      mobPaths.delete(req.params.address)
       updatePluginStatus()
       res.json({ success: true })
     })
@@ -256,6 +261,14 @@ function checkWatchedDevices() {
       
       const key = watched.userName.replace(/\s+/g, '_').toLowerCase()
       const lastSeenTime = new Date(device.lastSeen).toLocaleTimeString()
+      const message = `${watched.userName} not seen since: ${lastSeenTime}`
+
+      if (typeof app.notifications?.mob === 'function') {
+        mobPaths.delete(address)
+        const id = app.notifications.mob(message)
+        mobPaths.set(address, `notifications.mob.${id}`)
+        return
+      }
       
       app.handleMessage(plugin.id, {
         context: 'vessels.self' as any,
@@ -267,7 +280,7 @@ function checkWatchedDevices() {
             value: {
               state: 'emergency',
               method: ['visual', 'sound'],
-              message: `${watched.userName} not seen since: ${lastSeenTime}`,
+              message,
               ...(device.lastPosition && { position: device.lastPosition })
             }
           }]
