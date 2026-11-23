@@ -44,9 +44,35 @@ npm link signalk-bluetooth-scanner
 
 ## Setup
 
-### Internal Scanner: Linux Bluetooth Permissions (Default)
+### Signal K BLE Manager (Default when available)
 
-If you intend to run the scanner within the Node.js process running Signal K, grant Node.js permission to access Bluetooth without root:
+On servers exposing `app.bleApi` (tested with Signal K 2.37.0), the plugin
+subscribes to the server's shared advertisement stream. Enable **Use Signal K
+BLE Manager** in the plugin settings (enabled by default), then enable local
+Bluetooth management or configure a BLE gateway in the server's BLE Manager.
+The plugin appears under **Consumer Plugins** and receives advertisements from
+both local adapters and remote providers.
+
+This mode does not start another scanner, load Noble, require `setcap`, or
+control the shared adapter. The server remains responsible for Bluetooth access,
+including host D-Bus access when Signal K runs in Docker. Stopping the plugin
+unsubscribes it without stopping other BLE consumers.
+
+Device MAC addresses are normalized to lowercase to match existing watches.
+Repeated advertisements refresh the device's last-seen timestamp even when
+RSSI and payload are unchanged. The provider timestamp is used rather than
+treating cached device listings as new sightings. The existing per-person MOB
+notifications and timeout settings continue to work.
+
+**Use External Scanner** takes precedence when enabled. On older servers without
+the BLE API, or when **Use Signal K BLE Manager** is disabled, the plugin uses
+the legacy Noble scanner. Noble is an optional dependency: it is required only
+for the legacy and standalone scanners, so a native-module build failure does
+not prevent using the server BLE Manager.
+
+### Legacy Internal Scanner: Linux Bluetooth Permissions
+
+For the legacy Noble scanner only, grant Node.js permission to access Bluetooth without root:
 
 ```bash
 sudo setcap cap_net_raw+eip $(eval readlink -f `which node`)
@@ -138,6 +164,13 @@ When you clear the MOB notification in Signal K:
 ## Troubleshooting
 
 ### Bluetooth not working
+
+When using **Use Signal K BLE Manager**, check that the server's BLE Manager
+shows an active local adapter or gateway and recent advertisements. The plugin
+only receives new advertisements; it does not poll the cached device table to
+keep watches alive. If Noble reports a missing native module, check that
+**Use External Scanner** is off and **Use Signal K BLE Manager** is on with a
+server exposing the BLE API.
 
 Ensure Bluetooth is enabled:
 
