@@ -1,4 +1,4 @@
-import { Plugin, ServerAPI } from '@signalk/server-api'
+import { BLEAdvertisement, Notification, Plugin, ServerAPI } from '@signalk/server-api'
 let noble: any
 // Load noble lazily inside `start`/`stop` so tests can mock it before use.
 import * as dgram from 'dgram'
@@ -23,6 +23,7 @@ let app: ServerAPI
 const seenDevices = new Map<string, SeenDevice>()
 const watchedDevices = new Map<string, WatchedDevice>()
 const mobActive = new Set<string>()
+const mobPaths = new Map<string, string>()
 const subscriptions: any[] = []
 let checkTimer: NodeJS.Timeout | null = null
 let udpServer: dgram.Socket | null = null
@@ -63,6 +64,10 @@ const plugin: Plugin = {
         app.debug(`UDP server listening on ${scannerHost}:${scannerUdpPort}`)
         updatePluginStatus()
       })
+    } else if (options?.useSignalKBluetooth !== false && app.bleApi?.onAdvertisement) {
+      app.debug('Using Signal K BLE Manager')
+      subscriptions.push(app.bleApi.onAdvertisement(plugin.id, handleAdvertisement))
+      updatePluginStatus()
     } else {
       // Lazy-require noble so test mocks apply before we load the module
       // Use require to support both CJS and ESM default shapes.
@@ -94,14 +99,17 @@ const plugin: Plugin = {
 
   stop: function () {
     if (checkTimer) clearInterval(checkTimer)
+    checkTimer = null
     subscriptions.forEach(unsubscribe => unsubscribe())
     subscriptions.length = 0
     if (udpServer) {
       udpServer.close()
       udpServer = null
-    } else {
+    }
+    if (noble) {
       noble.stopScanning()
       noble.removeAllListeners()
+      noble = undefined
     }
     seenDevices.clear()
   },
@@ -109,6 +117,12 @@ const plugin: Plugin = {
   schema: () => ({
     type: 'object',
     properties: {
+      useSignalKBluetooth: {
+        type: 'boolean',
+        title: 'Use Signal K BLE Manager',
+        description: 'Receive advertisements from the server BLE providers when available, without opening a separate Bluetooth scanner. Older servers fall back to Noble. Use External Scanner takes precedence.',
+        default: true
+      },
       useExternalScanner: {
         type: 'boolean',
         title: 'Use External Scanner',
@@ -156,14 +170,17 @@ const plugin: Plugin = {
         {
           context: 'vessels.self',
           subscribe: [{
-            path: `notifications.mob.${key}`,
+            path: typeof app.notifications?.mob === 'function' ? 'notifications.mob.*' : `notifications.mob.${key}`,
             period: 1000
           }]
         } as any,
         localUnsubscribes,
         (err: any) => { app.debug(`Subscription error: ${err}`) },
         () => {
-          const notification = app.getSelfPath(`notifications.mob.${key}.value`)
+          const path = typeof app.notifications?.mob === 'function' ? mobPaths.get(address) : `notifications.mob.${key}`
+          // mob() can publish synchronously before returning its notification id.
+          if (!path) return
+          const notification = app.getSelfPath(`${path}.value`) as Notification | null | undefined
           if (!notification || notification.state === 'normal' || notification.state === null) {
             mobActive.delete(address)
             app.debug(`MOB cleared for ${userName}, can re-trigger`)
@@ -181,18 +198,30 @@ const plugin: Plugin = {
       app.debug(`Unwatching device: ${req.params.address}`)
       watchedDevices.delete(req.params.address)
       mobActive.delete(req.params.address)
+      mobPaths.delete(req.params.address)
       updatePluginStatus()
       res.json({ success: true })
     })
   }
 }
 
-function handleDevice(peripheral: any) {
-  const address = peripheral.address
-  const now = new Date().toISOString()
-  const device = seenDevices.get(address)
+function handleAdvertisement(advertisement: BLEAdvertisement) {
+  handleDevice({
+    address: advertisement.mac.toLowerCase(),
+    rssi: advertisement.rssi,
+    advertisement: { localName: advertisement.name }
+  }, advertisement.timestamp)
+}
 
-  const currentPosition = app.getSelfPath('navigation.position.value')
+function handleDevice(peripheral: any, timestamp = Date.now()) {
+  const address = peripheral.address
+  const device = seenDevices.get(address)
+  // A delayed provider report must not move a device's last sighting backwards.
+  if (!Number.isFinite(timestamp) || timestamp > Date.now() ||
+      (device && timestamp < Date.parse(device.lastSeen))) return
+  const now = new Date(timestamp).toISOString()
+
+  const currentPosition = app.getSelfPath('navigation.position.value') as SeenDevice['lastPosition']
   
   if (device) {
     device.lastSeen = now
@@ -232,6 +261,14 @@ function checkWatchedDevices() {
       
       const key = watched.userName.replace(/\s+/g, '_').toLowerCase()
       const lastSeenTime = new Date(device.lastSeen).toLocaleTimeString()
+      const message = `${watched.userName} not seen since: ${lastSeenTime}`
+
+      if (typeof app.notifications?.mob === 'function') {
+        mobPaths.delete(address)
+        const id = app.notifications.mob(message)
+        mobPaths.set(address, `notifications.mob.${id}`)
+        return
+      }
       
       app.handleMessage(plugin.id, {
         context: 'vessels.self' as any,
@@ -243,7 +280,7 @@ function checkWatchedDevices() {
             value: {
               state: 'emergency',
               method: ['visual', 'sound'],
-              message: `${watched.userName} not seen since: ${lastSeenTime}`,
+              message,
               ...(device.lastPosition && { position: device.lastPosition })
             }
           }]
