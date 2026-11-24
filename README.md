@@ -155,6 +155,18 @@ When a watched device is not detected for the specified timeout:
 
 ### Clearing MOB Alerts
 
+The plugin configuration includes **Automatically clear MOB when beacon returns**
+(`autoClearMobOnReturn`). It is **unchecked by default**, preserving the historical
+behavior: an alert stays active until manually cleared, even if the tag returns.
+This also applies to existing configurations that do not contain the option.
+
+When checked, a recent advertisement clears only the MOB created for that watch:
+`app.notifications.clear(id)` on servers with the native MOB API, or a `null`
+delta at the original alarm path on older servers. Other MOB alerts are left
+alone. A subsequent disappearance can trigger a new alert. Delayed reports
+that are still beyond the watch timeout do not clear the alarm. A failed native
+clear is retried on the next recent advertisement.
+
 When you clear the MOB notification in Signal K:
 
 - The watch continues monitoring

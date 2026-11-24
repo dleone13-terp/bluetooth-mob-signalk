@@ -1,4 +1,4 @@
-import { BLEAdvertisement, Notification, Plugin, ServerAPI } from '@signalk/server-api'
+import { BLEAdvertisement, Context, Notification, NotificationId, Path, Plugin, ServerAPI, Timestamp } from '@signalk/server-api'
 let noble: any
 // Load noble lazily inside `start`/`stop` so tests can mock it before use.
 import * as dgram from 'dgram'
@@ -27,6 +27,7 @@ const mobPaths = new Map<string, string>()
 const subscriptions: any[] = []
 let checkTimer: NodeJS.Timeout | null = null
 let udpServer: dgram.Socket | null = null
+let autoClearMobOnReturn = false
 
 const plugin: Plugin = {
   id: 'signalk-bluetooth-scanner',
@@ -35,6 +36,7 @@ const plugin: Plugin = {
   start: function (options: any) {
     app.debug('Plugin started')
     app.setPluginStatus('Initializing...')
+    autoClearMobOnReturn = options?.autoClearMobOnReturn === true
 
     const useExternalScanner = options?.useExternalScanner || false
     const scannerHost = options?.scannerHost || '127.0.0.1'
@@ -117,6 +119,12 @@ const plugin: Plugin = {
   schema: () => ({
     type: 'object',
     properties: {
+      autoClearMobOnReturn: {
+        type: 'boolean',
+        title: 'Automatically clear MOB when beacon returns',
+        description: 'Clear this watch\'s MOB alert when a recent advertisement is received again. Leave unchecked to keep alerts active until manually cleared (historical behavior).',
+        default: false
+      },
       useSignalKBluetooth: {
         type: 'boolean',
         title: 'Use Signal K BLE Manager',
@@ -177,12 +185,13 @@ const plugin: Plugin = {
         localUnsubscribes,
         (err: any) => { app.debug(`Subscription error: ${err}`) },
         () => {
-          const path = typeof app.notifications?.mob === 'function' ? mobPaths.get(address) : `notifications.mob.${key}`
+          const path = mobPaths.get(address)
           // mob() can publish synchronously before returning its notification id.
           if (!path) return
           const notification = app.getSelfPath(`${path}.value`) as Notification | null | undefined
           if (!notification || notification.state === 'normal' || notification.state === null) {
             mobActive.delete(address)
+            mobPaths.delete(address)
             app.debug(`MOB cleared for ${userName}, can re-trigger`)
           }
         }
@@ -243,6 +252,38 @@ function handleDevice(peripheral: any, timestamp = Date.now()) {
     })
     app.debug(`New device: ${address} (${peripheral.advertisement?.localName || 'Unknown'})`)
   }
+  const watched = watchedDevices.get(address)
+  // A delayed provider report beyond the timeout is not a return to presence.
+  if (watched && Date.now() - timestamp <= watched.timeoutSeconds * 1000) {
+    clearMobOnReturn(watched)
+  }
+}
+
+function clearMobOnReturn(watched: WatchedDevice) {
+  if (!autoClearMobOnReturn) return
+  const path = mobPaths.get(watched.address)
+  if (!mobActive.has(watched.address) || !path) return
+  try {
+    if (typeof app.notifications?.mob === 'function') {
+      // Use the identifier returned at creation, never a name or another MOB.
+      app.notifications.clear(path.slice('notifications.mob.'.length) as NotificationId)
+    } else {
+      app.handleMessage(plugin.id, {
+        context: 'vessels.self' as Context,
+        updates: [{
+          timestamp: new Date().toISOString() as Timestamp,
+          source: { label: plugin.id },
+          values: [{ path: path as Path, value: null }]
+        }]
+      })
+    }
+    mobActive.delete(watched.address)
+    mobPaths.delete(watched.address)
+    app.debug(`MOB cleared: ${watched.userName} received again`)
+  } catch (error) {
+    // Keep the identifier so the next recent advertisement can retry.
+    app.debug(`Failed to clear MOB for ${watched.userName}: ${error}`)
+  }
 }
 
 function checkWatchedDevices() {
@@ -270,6 +311,7 @@ function checkWatchedDevices() {
         return
       }
       
+      mobPaths.set(address, `notifications.mob.${key}`)
       app.handleMessage(plugin.id, {
         context: 'vessels.self' as any,
         updates: [{
