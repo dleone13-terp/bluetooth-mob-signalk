@@ -448,6 +448,13 @@ describe('Bluetooth MOB Plugin', () => {
       expect(mockApp.setPluginStatus).toHaveBeenCalledWith('Initializing...')
     })
 
+    it('can explicitly use the legacy scanner when the server BLE API exists', () => {
+      mockApp.bleApi = { onAdvertisement: vi.fn() }
+      plugin.start({ useSignalKBluetooth: false })
+      expect(mockApp.bleApi.onAdvertisement).not.toHaveBeenCalled()
+      expect(noble.on).toHaveBeenCalledWith('discover', expect.any(Function))
+    })
+
     it('should start scanning when Bluetooth powered on', () => {
       plugin.start()
       
